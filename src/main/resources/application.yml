@@ -1,1 +1,3 @@
-spring.application.name=vibe-with-codex
+spring:
+  application:
+    name: vibe-with-codex
