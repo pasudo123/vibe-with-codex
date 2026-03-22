@@ -118,6 +118,26 @@ fun findProduct(id: String): Product {
 | Time | `expireAfterWrite`, `expireAfterAccess`, `expireAfter(Expiry)` | 오래된(stale) 데이터 노출 | 데이터 신선도가 SLA에 직접 영향 줄 때 | "쓰기 기준 만료"와 "접근 기준 만료"를 혼동하기 쉬움 |
 | Reference | `weakKeys`, `weakValues`, `softValues` | GC 압력 상황에서 회수되지 않는 객체 | 메모리 압력 대응이 최우선일 때 | 성능 최적화 수단으로 먼저 쓰면 예측이 어려워질 수 있음 |
 
+### 2-1-1. Eviction 3축 관계도
+
+```mermaid
+flowchart LR
+    A[Cache Entry] --> B{Size 정책}
+    A --> C{Time 정책}
+    A --> D{Reference 정책}
+    B -->|초과| E[Eviction/Miss]
+    C -->|만료| E
+    D -->|GC 회수| E
+    B -->|정상| F[Hit 후보]
+    C -->|유효| F
+    D -->|유지| F
+```
+
+이 다이어그램에서 핵심은 세 가지다.
+- Size, Time, Reference는 독립적으로 설정해도 동시에 결과에 영향을 준다.
+- TTL이 남아 있어도 size/reference 조건으로 miss가 먼저 발생할 수 있다.
+- 따라서 miss 원인 분석 시 "시간 정책만" 보면 오판하기 쉽다.
+
 ### 2-2. Size 기반 상세
 - `maximumSize`: 엔트리 수 기반 상한
 - `maximumWeight + weigher`: 엔트리별 비용을 정의해 가중치 합으로 제어
@@ -194,6 +214,21 @@ val gcSensitive = Caffeine.newBuilder()
 | 갱신 실행 방식 | 새 조회 시 로딩 | 조회를 계기로 갱신 시작 |
 | 목적 | 엄격한 유효기간 | 지연 스파이크를 줄인 점진 갱신 |
 
+### 3-1-1. expire vs refresh 시간축
+
+```mermaid
+flowchart LR
+    A[값 적재] --> B[시간 경과]
+    B --> C{expireAfterWrite}
+    C -->|조회 발생| D[만료로 miss 가능]
+    B --> E{refreshAfterWrite}
+    E -->|조회 발생| F[기존 값 반환 + refresh 시작]
+```
+
+이 다이어그램에서 볼 포인트는 두 가지다.
+- `expireAfterWrite`는 만료 후 miss가 날 수 있는 정책이다.
+- `refreshAfterWrite`는 cron처럼 자동으로 도는 주기 갱신이 아니라 조회 트리거 기반이다.
+
 ### 3-2. 코드 예시
 
 ```kotlin
@@ -224,6 +259,23 @@ val refreshCache = Caffeine.newBuilder()
 | source/TTL 응답 노출 | 기본 추상화 범위 밖 | 직접 구현 가능 |
 | L1(Local) + L2(Redis) 세밀 제어 | 추가 설계 필요 | 자연스럽게 구현 가능 |
 | 학습 목적 적합성 | 개념 입문에 유리 | 내부 흐름 학습에 유리 |
+
+### 4-1-1. 방식 선택 가이드
+
+```mermaid
+flowchart TD
+    A[캐시 적용 요구사항 정리] --> B{응답에 source/TTL 노출 필요?}
+    B -->|예| C[Native cache-aside 우선 검토]
+    B -->|아니오| D{L1 + L2 제어가 핵심?}
+    D -->|예| C
+    D -->|아니오| E{개발 생산성/선언형 우선?}
+    E -->|예| F[Spring 래핑 우선]
+    E -->|아니오| C
+```
+
+이 다이어그램은 우열 비교가 아니라 선택 기준을 정리하기 위한 도식이다.
+- 메서드 결과 캐싱 중심이면 Spring 래핑이 빠르게 적용된다.
+- 계층 캐시 오케스트레이션과 응답 의미 제어가 핵심이면 Native 방식이 유리하다.
 
 ### 4-2. 왜 이 study는 Native를 선택했는가
 현재 study 요구사항은 다음과 같다.
