@@ -1,8 +1,8 @@
 # Caffeine Local Cache 딥다이브
 
-Spring Boot에서 Caffeine을 사용할 때는 다음 선택을 먼저 정리해야 한다.
+Spring Boot에서 Caffeine을 사용할 때는 적용 방식의 선택 기준을 먼저 정리해야 한다.
 
-> `@Cacheable` + `CaffeineCacheManager`로 끝낼 것인가, 아니면 native Caffeine API로 계층 캐시 흐름까지 직접 제어할 것인가?
+> 선택 기준: `@Cacheable` + `CaffeineCacheManager` 중심의 선언형 적용 vs native Caffeine API 기반의 직접 제어
 
 이 문서는 다음 4축으로 정리한다.
 - 사용방법
@@ -234,7 +234,7 @@ val refreshCache = Caffeine.newBuilder()
 
 이 요구사항은 "캐시 적용"보다 "캐시 흐름 자체"가 핵심이라, 수동 cache-aside가 더 직접적이다.
 
-### 4-3. Spring 래핑이 부족하다는 뜻인가?
+### 4-3. Spring 래핑의 한계로 해석하면 안 되는 이유
 그렇지 않다. Spring 래핑은 메서드 결과 캐싱에 매우 효율적이다.
 다만 이번 주제는 "결과 캐싱"이 아니라 "계층 캐시 오케스트레이션"이 중심이라 선택이 달라진 케이스다.
 
@@ -309,9 +309,9 @@ println("averageLoadPenalty(ns) = ${stats.averageLoadPenalty()}")
 | 테스트 불안정 | 같은 테스트가 가끔만 실패 | sleep 의존 시간 레이스 | `Ticker` 기반 테스트 고려 |
 
 ### 6-2. 체크리스트
-- 캐시 목적(성능/일관성/비용절감)을 명시했는가?
-- TTL, invalidation, fallback 정책을 문서화했는가?
-- 관측 지표 없이 감으로 조정하고 있지 않은가?
+- 캐시 목적(성능/일관성/비용절감)을 명시한다.
+- TTL, invalidation, fallback 정책을 문서화한다.
+- 관측 지표 없이 감으로 정책을 조정하지 않는다.
 
 각주:
 - [1] stale 데이터: 최신 원본 데이터와 캐시 데이터가 잠시 불일치하는 상태
