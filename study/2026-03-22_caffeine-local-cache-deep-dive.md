@@ -1,6 +1,6 @@
 # Caffeine Local Cache 딥다이브
 
-Spring Boot에서 Caffeine을 사용할 때 핵심 질문은 하나다.
+Spring Boot에서 Caffeine을 사용할 때는 다음 선택을 먼저 정리해야 한다.
 
 > `@Cacheable` + `CaffeineCacheManager`로 끝낼 것인가, 아니면 native Caffeine API로 계층 캐시 흐름까지 직접 제어할 것인가?
 
@@ -122,7 +122,7 @@ fun findProduct(id: String): Product {
 - `maximumSize`: 엔트리 수 기반 상한
 - `maximumWeight + weigher`: 엔트리별 비용을 정의해 가중치 합으로 제어
 - Caffeine은 admission/eviction 정책을 통해 hit ratio를 최대화하려고 시도한다(W-TinyLFU 계열)
-- 쉬운 예시: "상품 100만 건 중 자주 조회되는 1만 건만 빠르게 유지"하고 싶다면 Size 제한이 출발점이다.
+- 예시 시나리오: "상품 100만 건 중 자주 조회되는 1만 건만 빠르게 유지"가 목표라면 Size 제한이 기본 전략이 된다.
 
 예시:
 ```kotlin
@@ -143,7 +143,7 @@ val byWeight = Caffeine.newBuilder()
 - `expireAfterWrite`: 마지막 쓰기 시점 기준 만료
 - `expireAfterAccess`: 마지막 접근 시점 기준 만료
 - `expireAfter(Expiry)`: 엔트리별 커스텀 만료 정책
-- 쉬운 예시: "가격은 10초마다 바뀔 수 있다"면 `expireAfterWrite(10s)`가 이해하기 쉽다.
+- 예시 시나리오: "가격은 10초마다 바뀔 수 있다"는 조건이면 `expireAfterWrite(10s)`가 명확하다.
 
 예시:
 ```kotlin
@@ -162,7 +162,7 @@ val accessBased = Caffeine.newBuilder()
 - `weakKeys`: key를 약한 참조로 관리
 - `weakValues`, `softValues`: value를 GC 정책과 연계
 - 참조 기반 정책은 성능보다 메모리 압력 대응 목적일 때 선택하는 편이 안전하다.
-- 쉬운 예시: "개발 툴/백오피스처럼 메모리 급등 구간이 잦다"면 Reference 정책을 제한적으로 검토한다.
+- 예시 시나리오: "개발 툴/백오피스처럼 메모리 급등 구간이 잦다"면 Reference 정책을 제한적으로 검토한다.
 
 예시:
 ```kotlin
@@ -226,7 +226,7 @@ val refreshCache = Caffeine.newBuilder()
 | 학습 목적 적합성 | 개념 입문에 유리 | 내부 흐름 학습에 유리 |
 
 ### 4-2. 왜 이 study는 Native를 선택했는가
-현재 study 요구사항은 아래였다.
+현재 study 요구사항은 다음과 같다.
 - 조회 source(`LOCAL/REDIS/MISS`)를 응답으로 내려야 함
 - `ttlRemainingSeconds`를 source 기준으로 내려야 함
 - `seed` 재적재 시 local invalidate 정책 제어 필요
@@ -235,7 +235,7 @@ val refreshCache = Caffeine.newBuilder()
 이 요구사항은 "캐시 적용"보다 "캐시 흐름 자체"가 핵심이라, 수동 cache-aside가 더 직접적이다.
 
 ### 4-3. Spring 래핑이 부족하다는 뜻인가?
-아니다. Spring 래핑은 메서드 결과 캐싱에는 매우 효율적이다.
+그렇지 않다. Spring 래핑은 메서드 결과 캐싱에 매우 효율적이다.
 다만 이번 주제는 "결과 캐싱"이 아니라 "계층 캐시 오케스트레이션"이 중심이라 선택이 달라진 케이스다.
 
 출처:
