@@ -1,0 +1,47 @@
+@host = http://localhost:8080
+@contentType = application/json
+
+### 1) Redis Mock에 seed 데이터 저장
+POST {{host}}/study/cachetier/seed
+Content-Type: {{contentType}}
+
+{
+  "key": "product:100",
+  "value": "apple",
+  "ttlSeconds": 120
+}
+
+### 2) 첫 조회: Local miss -> Redis hit 기대 (source: REDIS)
+GET {{host}}/study/cachetier/data/product:100
+Accept: {{contentType}}
+
+### 3) 즉시 재조회: Local hit 기대 (source: LOCAL)
+GET {{host}}/study/cachetier/data/product:100
+Accept: {{contentType}}
+
+### 4) 존재하지 않는 key 조회: MISS 기대 (source: MISS)
+GET {{host}}/study/cachetier/data/product:not-found
+Accept: {{contentType}}
+
+### 5) TTL 만료 테스트용 seed (2초)
+POST {{host}}/study/cachetier/seed
+Content-Type: {{contentType}}
+
+{
+  "key": "product:ttl-short",
+  "value": "short-lived",
+  "ttlSeconds": 2
+}
+
+### 6) 즉시 조회: Redis hit 기대 (source: REDIS)
+GET {{host}}/study/cachetier/data/product:ttl-short
+Accept: {{contentType}}
+
+### 7) 즉시 재조회: Local hit 기대 (source: LOCAL)
+GET {{host}}/study/cachetier/data/product:ttl-short
+Accept: {{contentType}}
+
+### 8) 3초 이상 대기 후 다시 조회: Redis TTL 만료로 MISS 기대 (source: MISS)
+# 수동 대기 가이드: 마지막 요청 실행 전에 최소 3초 기다린 뒤 실행
+GET {{host}}/study/cachetier/data/product:ttl-short
+Accept: {{contentType}}
