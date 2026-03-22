@@ -208,12 +208,6 @@ val refreshCache = Caffeine.newBuilder()
     .build<String, Product> { key -> loadFromStore(key) }
 ```
 
-### 3-3. 질문에 대한 한 줄 정리
-- `expire`는 "만료 후 재적재 전까지 miss가 날 수 있음"이 맞다.
-- `refresh`는 "인터벌마다 자동 스케줄 실행"이 아니라, **조회가 들어왔을 때** refresh를 트리거한다.
-  - 즉, "계속 백그라운드에서 주기적으로 갱신"과는 다르다.
-  - 자주 읽히는 키는 자연스럽게 갱신되고, 거의 읽히지 않는 키는 refresh가 잘 돌지 않을 수 있다.
-
 출처:
 - Refresh: https://github.com/ben-manes/caffeine/wiki/Refresh
 
