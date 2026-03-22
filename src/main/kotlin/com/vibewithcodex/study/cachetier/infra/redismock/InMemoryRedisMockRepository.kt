@@ -16,7 +16,7 @@ class InMemoryRedisMockRepository : RedisMockRepository {
 
     private val store = ConcurrentHashMap<String, RedisMockEntry>()
 
-    override fun get(key: String): String? {
+    override fun get(key: String): RedisLookupResult? {
         val entry = store[key] ?: return null
         val now = System.currentTimeMillis()
 
@@ -25,7 +25,12 @@ class InMemoryRedisMockRepository : RedisMockRepository {
             store.remove(key)
             return null
         }
-        return entry.value
+        val ttlRemainingMillis = entry.expiresAtMillis - now
+        val ttlRemainingSeconds = (ttlRemainingMillis + 999) / 1000
+        return RedisLookupResult(
+            value = entry.value,
+            ttlRemainingSeconds = ttlRemainingSeconds,
+        )
     }
 
     override fun put(key: String, value: String, ttlSeconds: Long) {

@@ -8,14 +8,16 @@ Content-Type: {{contentType}}
 {
   "key": "product:100",
   "value": "apple",
-  "ttlSeconds": 120
+  "ttlSeconds": 30
 }
 
 ### 2) 첫 조회: Local miss -> Redis hit 기대 (source: REDIS)
+# 응답 필드 확인: ttlRemainingSeconds (source=REDIS 이므로 Redis TTL 기준)
 GET {{host}}/study/cachetier/data/product:100
 Accept: {{contentType}}
 
 ### 3) 즉시 재조회: Local hit 기대 (source: LOCAL)
+# 응답 필드 확인: ttlRemainingSeconds (source=LOCAL 이므로 Local TTL 기준)
 GET {{host}}/study/cachetier/data/product:100
 Accept: {{contentType}}
 
@@ -41,7 +43,15 @@ Accept: {{contentType}}
 GET {{host}}/study/cachetier/data/product:ttl-short
 Accept: {{contentType}}
 
-### 8) 3초 이상 대기 후 다시 조회: Redis TTL 만료로 MISS 기대 (source: MISS)
+### 8) Local Cache 수동 초기화 (Redis는 유지)
+POST {{host}}/study/cachetier/local/clear
+Accept: {{contentType}}
+
+### 9) Local clear 직후 조회: Redis hit 기대 (source: REDIS)
+GET {{host}}/study/cachetier/data/product:ttl-short
+Accept: {{contentType}}
+
+### 10) 3초 이상 대기 후 다시 조회: Redis TTL 만료로 MISS 기대 (source: MISS)
 # 수동 대기 가이드: 마지막 요청 실행 전에 최소 3초 기다린 뒤 실행
 GET {{host}}/study/cachetier/data/product:ttl-short
 Accept: {{contentType}}

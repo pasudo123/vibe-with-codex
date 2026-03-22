@@ -10,7 +10,7 @@ interface RedisMockRepository {
      * key에 해당하는 값을 조회한다.
      * 값이 없거나 TTL이 만료된 경우 null을 반환한다.
      */
-    fun get(key: String): String?
+    fun get(key: String): RedisLookupResult?
 
     /**
      * key/value를 TTL(초)과 함께 저장한다.
@@ -22,3 +22,14 @@ interface RedisMockRepository {
      */
     fun clear()
 }
+
+/**
+ * Redis 조회 결과 모델.
+ *
+ * @property value 저장된 값
+ * @property ttlRemainingSeconds 조회 시점 기준 남은 TTL(초)
+ */
+data class RedisLookupResult(
+    val value: String,
+    val ttlRemainingSeconds: Long,
+)

@@ -19,7 +19,7 @@ class StudyCacheTierService(
     @Qualifier(StudyCacheTierConfig.LOCAL_CACHE_BEAN_NAME)
     private val localCache: Cache<String, LocalCacheValue>,
     private val redisMockRepository: RedisMockRepository,
-    @Value("\${study.cachetier.local-ttl-seconds:60}")
+    @Value("\${study.cachetier.local-ttl-seconds:10}")
     private val localTtlSeconds: Long,
     @Value("\${study.cachetier.redis-default-ttl-seconds:60}")
     private val redisDefaultTtlSeconds: Long,
@@ -50,7 +50,7 @@ class StudyCacheTierService(
         }
 
         // 2차 캐시 조회: 로컬 miss일 때만 Redis Mock에 접근한다.
-        val redisValue = redisMockRepository.get(key)
+        val redisLookup = redisMockRepository.get(key)
             ?: return CacheLookupResponse(
                 key = key,
                 value = null,
@@ -59,6 +59,7 @@ class StudyCacheTierService(
             )
 
         // Redis hit 시점에 로컬 캐시를 재적재해 다음 요청을 빠르게 처리한다.
+        val redisValue = redisLookup.value
         val localExpiresAt = now + (localTtlSeconds * 1000)
         localCache.put(key, LocalCacheValue(redisValue, localExpiresAt))
 
@@ -66,7 +67,7 @@ class StudyCacheTierService(
             key = key,
             value = redisValue,
             source = CacheSource.REDIS,
-            ttlRemainingSeconds = localTtlSeconds,
+            ttlRemainingSeconds = redisLookup.ttlRemainingSeconds,
         )
     }
 
@@ -75,6 +76,9 @@ class StudyCacheTierService(
      */
     fun seedRedis(key: String, value: String, ttlSeconds: Long?) {
         redisMockRepository.put(key, value, ttlSeconds ?: redisDefaultTtlSeconds)
+        // 동일 key를 다시 seed하는 경우, 기존 Local 캐시 값/TTL을 즉시 폐기해
+        // 다음 조회가 최신 Redis Mock 값을 기준으로 다시 적재되도록 보장한다.
+        localCache.invalidate(key)
     }
 
     /**
@@ -83,6 +87,13 @@ class StudyCacheTierService(
     fun clearForTest() {
         localCache.invalidateAll()
         redisMockRepository.clear()
+    }
+
+    /**
+     * 학습 편의용 수동 Local Cache 초기화.
+     */
+    fun clearLocalCache() {
+        localCache.invalidateAll()
     }
 }
 

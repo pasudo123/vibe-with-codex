@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController
  *
  * - seed: Redis Mock에 데이터 주입
  * - data: Local -> Redis 순서의 실제 조회 흐름 확인
+ * - local/clear: Local Cache 수동 초기화
  */
 @RestController
 @RequestMapping("/study/cachetier")
@@ -50,6 +51,16 @@ class StudyCacheTierController(
     fun getData(@PathVariable key: String): CacheLookupResponse {
         return studyCacheTierService.getData(key)
     }
+
+    /**
+     * Local Cache를 즉시 초기화한다.
+     * Redis Mock은 그대로 유지되므로 다음 조회 시 Redis 경로를 재확인할 수 있다.
+     */
+    @PostMapping("/local/clear")
+    fun clearLocalCache(): ClearLocalCacheResponse {
+        studyCacheTierService.clearLocalCache()
+        return ClearLocalCacheResponse(message = "Local cache cleared")
+    }
 }
 
 /**
@@ -75,5 +86,12 @@ data class SeedCacheResponse(
     val key: String,
     val value: String,
     val ttlSeconds: Long?,
+    val message: String,
+)
+
+/**
+ * local cache clear 결과 응답 모델.
+ */
+data class ClearLocalCacheResponse(
     val message: String,
 )

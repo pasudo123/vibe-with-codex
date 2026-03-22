@@ -42,11 +42,13 @@ class StudyCacheTierServiceTest : FunSpec() {
             val first = studyCacheTierService.getData("product:1")
             first.source shouldBe CacheSource.REDIS
             first.value shouldBe "apple"
+            (first.ttlRemainingSeconds != null && first.ttlRemainingSeconds in 1L..5L) shouldBe true
 
             // 3) 같은 키 재조회는 Local hit
             val second = studyCacheTierService.getData("product:1")
             second.source shouldBe CacheSource.LOCAL
             second.value shouldBe "apple"
+            (second.ttlRemainingSeconds != null && second.ttlRemainingSeconds in 0L..1L) shouldBe true
         }
 
         test("both local and redis miss") {
@@ -55,6 +57,7 @@ class StudyCacheTierServiceTest : FunSpec() {
 
             response.source shouldBe CacheSource.MISS
             response.value.shouldBeNull()
+            response.ttlRemainingSeconds.shouldBeNull()
         }
 
         test("local ttl expiration forces redis lookup again") {
@@ -81,6 +84,38 @@ class StudyCacheTierServiceTest : FunSpec() {
             val response = studyCacheTierService.getData("product:3")
             response.source shouldBe CacheSource.MISS
             response.value.shouldBeNull()
+        }
+
+        test("same key reseed invalidates local and resets effective ttl flow") {
+            // 첫 seed 후 조회해 Local 캐시에 값이 올라간 상태를 만든다.
+            studyCacheTierService.seedRedis(key = "product:4", value = "old", ttlSeconds = 5)
+            studyCacheTierService.getData("product:4").source shouldBe CacheSource.REDIS
+            studyCacheTierService.getData("product:4").source shouldBe CacheSource.LOCAL
+
+            // 동일 key를 다시 seed하면 Local 캐시가 무효화되어야 한다.
+            studyCacheTierService.seedRedis(key = "product:4", value = "new", ttlSeconds = 1)
+
+            // 무효화가 되었다면 첫 조회는 Redis를 타고 최신 값을 가져와야 한다.
+            val afterReseed = studyCacheTierService.getData("product:4")
+            afterReseed.source shouldBe CacheSource.REDIS
+            afterReseed.value shouldBe "new"
+
+            // 짧은 TTL 만료 후에는 MISS가 되어야 한다.
+            Thread.sleep(1200)
+            studyCacheTierService.getData("product:4").source shouldBe CacheSource.MISS
+        }
+
+        test("manual local clear forces next read to redis") {
+            studyCacheTierService.seedRedis(key = "product:5", value = "orange", ttlSeconds = 5)
+            studyCacheTierService.getData("product:5").source shouldBe CacheSource.REDIS
+            studyCacheTierService.getData("product:5").source shouldBe CacheSource.LOCAL
+
+            studyCacheTierService.clearLocalCache()
+
+            // Local을 비운 직후에는 Redis 경로로 다시 조회되어야 한다.
+            val afterClear = studyCacheTierService.getData("product:5")
+            afterClear.source shouldBe CacheSource.REDIS
+            afterClear.value shouldBe "orange"
         }
     }
 }
