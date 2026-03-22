@@ -290,9 +290,40 @@ flowchart TD
 그렇지 않다. Spring 래핑은 메서드 결과 캐싱에 매우 효율적이다.
 다만 이번 주제는 "결과 캐싱"이 아니라 "계층 캐시 오케스트레이션"이 중심이라 선택이 달라진 케이스다.
 
+### 4-4. Caffeine vs Ehcache (공식 근거 기반 비교)
+확인 기준 날짜: 2026-03-22
+
+| 관점 | Caffeine (공식 근거) | Ehcache (공식 근거) | 실무 해석 |
+| --- | --- | --- | --- |
+| Spring 통합 경로 | Spring 문서에서 `org.springframework.cache.caffeine` 기반 `CaffeineCacheManager`를 직접 제공 | Spring 문서에서 Ehcache 3.x는 JSR-107(JCache) 준수로 별도 전용 지원 없이 JCache 경로 사용 | Spring 캐시 추상화에서 단순/직접 통합은 Caffeine이 직관적이고, 표준 API(JCache) 중심이면 Ehcache도 자연스럽다 |
+| 설계 목표 | Caffeine 공식 문서/README는 high performance, near optimal hit rate를 강조하고 Design 문서에서 W-TinyLFU 정책을 명시 | Ehcache 문서는 tiered caching(heap/off-heap/disk/clustered)과 운영 제약/설정 규칙을 상세히 제공 | 인메모리 hit ratio와 단순 고성능 최적화는 Caffeine이 강점이고, 저장 계층 전략과 운영 옵션은 Ehcache가 강점이다 |
+| 저장 계층/지속성 | 기본적으로 로컬 인메모리 캐시에 집중 | Tiering 문서에서 off-heap/disk/clustered를 다루고, XML 문서에서 `PersistentCacheManager`/`<persistence>`를 명시 | 캐시를 메모리 밖 계층까지 설계하려면 Ehcache의 기능 폭이 넓다 |
+| 쓰기 연동 기능 | cache-aside/loader 중심 설계가 일반적 | Writers 문서에서 write-through/write-behind, batching/coalescing/concurrency 옵션 제공 | 시스템 오브 레코드와 쓰기 연동 정책이 중요하면 Ehcache 설계 옵션이 유용하다 |
+
+### 4-4-1. 왜 Caffeine이 좋다고 말하는가 (조건부)
+- "Spring 기반 로컬 캐시를 빠르게 붙이고 튜닝하고 싶다"는 조건에서는 Caffeine이 더 단순한 선택이 되기 쉽다.
+- "near optimal hit rate"와 W-TinyLFU 기반 정책을 공식 문서에서 명시하므로, 성능/히트율 관점의 설명 근거가 명확하다.
+- 다만 이 평가는 "인메모리 로컬 캐시 중심" 조건에서 유효하다. 저장 계층/지속성/쓰기 연동이 핵심이면 Ehcache가 더 맞을 수 있다.
+
+### 4-4-2. 선택 가이드 (요약표)
+
+| 요구사항 | 더 잘 맞는 선택 | 이유 |
+| --- | --- | --- |
+| Spring에서 빠르게 로컬 캐시 적용 + 코드 간결성 우선 | Caffeine | Spring의 전용 Caffeine 통합 경로가 단순하고, builder 기반 튜닝이 직관적 |
+| 히트율 중심의 인메모리 캐시 최적화 | Caffeine | 공식 Design 문서에서 W-TinyLFU 기반 hit rate 최적화 방향을 명시 |
+| off-heap/disk/clustered 계층 설계가 필요 | Ehcache | 공식 Tiering 문서에서 다중 계층과 제약 조건을 체계적으로 제공 |
+| JCache(JSR-107) 표준 API 중심 운영 | Ehcache | Spring 문서에서 Ehcache 3.x의 JSR-107 준수와 JCache 경로를 명시 |
+| write-behind 등 쓰기 경로 제어가 중요 | Ehcache | 공식 Writers 문서에서 배치/코얼레싱/동시성 옵션을 제공 |
+
 출처:
 - Spring cache store config: https://docs.spring.io/spring-framework/reference/integration/cache/store-configuration.html#cache-store-configuration-caffeine
 - Spring `CaffeineCacheManager` Javadoc: https://docs.enterprise.spring.io/spring-framework/docs/6.1.22/javadoc-api/org/springframework/cache/caffeine/CaffeineCacheManager.html
+- Caffeine README: https://github.com/ben-manes/caffeine
+- Caffeine Design: https://github.com/ben-manes/caffeine/wiki/Design
+- Ehcache 3.11 JSR-107 Provider: https://www.ehcache.org/documentation/3.11/107.html
+- Ehcache 3.11 Tiering: https://www.ehcache.org/documentation/3.11/tiering.html
+- Ehcache 3.11 XML (`<persistence>`): https://www.ehcache.org/documentation/3.11/xml.html
+- Ehcache 3.11 Writers (write-behind): https://www.ehcache.org/documentation/3.11/writers.html
 
 ---
 
@@ -386,3 +417,8 @@ println("averageLoadPenalty(ns) = ${stats.averageLoadPenalty()}")
 - Caffeine Refresh: https://github.com/ben-manes/caffeine/wiki/Refresh
 - Spring Caffeine Store Config: https://docs.spring.io/spring-framework/reference/integration/cache/store-configuration.html#cache-store-configuration-caffeine
 - Spring `CaffeineCacheManager` Javadoc: https://docs.enterprise.spring.io/spring-framework/docs/6.1.22/javadoc-api/org/springframework/cache/caffeine/CaffeineCacheManager.html
+- Ehcache 3.11 Docs Home: https://www.ehcache.org/documentation/3.11/
+- Ehcache 3.11 JSR-107 Provider: https://www.ehcache.org/documentation/3.11/107.html
+- Ehcache 3.11 Tiering: https://www.ehcache.org/documentation/3.11/tiering.html
+- Ehcache 3.11 XML: https://www.ehcache.org/documentation/3.11/xml.html
+- Ehcache 3.11 Writers: https://www.ehcache.org/documentation/3.11/writers.html
