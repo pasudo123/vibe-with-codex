@@ -1,20 +1,24 @@
 # Caffeine Local Cache 딥다이브
 
-Spring Boot에서 Caffeine을 사용할 때, "그냥 @Cacheable로 끝낼지" 또는 "Caffeine API를 직접 제어할지"는 기능 문제가 아니라 **제어 지점(control point)** 선택 문제다.
+Spring Boot에서 Caffeine을 사용할 때 핵심 질문은 하나다.
 
-이 글은 아래 4가지를 중심으로 정리한다.
+> `@Cacheable` + `CaffeineCacheManager`로 끝낼 것인가, 아니면 native Caffeine API로 계층 캐시 흐름까지 직접 제어할 것인가?
+
+이 문서는 다음 4축으로 정리한다.
 - 사용방법
 - 동작방식
 - 응용방식
 - 유의사항(사이드 이펙트)
 
+그리고 내부 구현은 별도 심화 문서로 분리했다.
+- 심화: `study/2026-03-22_caffeine-local-cache-internals-deep-dive.md`
+
 ---
 
 ## TL;DR
-- Caffeine은 단순 Map이 아니라, 높은 적중률과 처리량을 목표로 설계된 고성능 로컬 캐시다.
-- Spring Cache Abstraction(`@Cacheable`, `CaffeineCacheManager`)도 충분히 강력하다.
-- 다만 L1(Local) + L2(Redis)처럼 **계층 흐름과 응답 형식(source/TTL)을 직접 통제**해야 하면 native 방식이 더 명확할 때가 있다.
-- 실무에서는 "추상화 레벨을 어디까지 올릴지"가 핵심 결정 포인트다.
+- Caffeine은 단순 Map이 아니라 **축출 정책 + 동시성 최적화 + 높은 hit ratio**를 목표로 설계된 캐시다.
+- Spring 래핑 방식도 충분히 강력하다. 다만 응답에 source/TTL을 노출하거나 L1/L2 흐름을 세밀하게 제어하려면 native 방식이 더 명확할 수 있다.
+- 캐시 품질은 "라이브러리 선택"보다 "TTL/키/무효화/관측성 설계"가 좌우한다.
 
 ---
 
@@ -27,152 +31,215 @@ implementation("org.springframework.boot:spring-boot-starter-cache")
 implementation("com.github.ben-manes.caffeine:caffeine")
 ```
 
-### 1-2. 최소 설정 예시 (Spring Bean)
+### 1-2. 최소 설정 (Spring Bean)
 
 ```kotlin
 @Bean
-fun studyLocalCache(
-  @Value("\${study.cachetier.local-ttl-seconds:10}") ttl: Long,
-): Cache<String, LocalCacheValue> {
-  return Caffeine.newBuilder()
-    .expireAfterWrite(Duration.ofSeconds(ttl))
-    .maximumSize(10_000)
-    .build()
+fun localCache(
+    @Value("\${study.cache.local-ttl-seconds:10}") ttlSeconds: Long,
+): Cache<String, Product> {
+    return Caffeine.newBuilder()
+        // write 이후 ttlSeconds가 지나면 만료
+        .expireAfterWrite(Duration.ofSeconds(ttlSeconds))
+        // 최대 엔트리 수 제한
+        .maximumSize(10_000)
+        // 통계 수집 활성화 (Micrometer 연결 시 유용)
+        .recordStats()
+        .build()
 }
 ```
 
-### 1-3. API 선택 기준
-- `Cache<K, V>`: put/get/invalidate를 직접 제어
-- `LoadingCache<K, V>`: miss 시 자동 로딩
-- `AsyncLoadingCache<K, V>`: 비동기 로딩(CompletableFuture 기반)
+### 1-3. LoadingCache / AsyncLoadingCache 예시
+
+```kotlin
+// miss 시 loader를 통해 자동 적재
+val loadingCache = Caffeine.newBuilder()
+    .maximumSize(10_000)
+    .expireAfterWrite(Duration.ofMinutes(5))
+    .build<String, Product> { key ->
+        // loader 내부는 느린 IO(DB/API) 가능
+        productRepository.findById(key)
+            ?: error("not found: $key")
+    }
+
+// 비동기 로딩 버전 (CompletableFuture)
+val asyncCache = Caffeine.newBuilder()
+    .maximumSize(10_000)
+    .buildAsync<String, Product> { key, _ ->
+        CompletableFuture.supplyAsync {
+            productRepository.findById(key)
+                ?: error("not found: $key")
+        }
+    }
+```
+
+### 1-4. API 선택 기준 (표)
+
+| API | 추천 상황 | 장점 | 유의사항 |
+| --- | --- | --- | --- |
+| `Cache<K, V>` | cache-aside를 서비스 코드에서 직접 제어할 때 | 제어점이 가장 많음 | miss 로딩/중복 요청 방지 로직을 직접 설계해야 함 |
+| `LoadingCache<K, V>` | miss 로딩 규칙이 명확할 때 | 코드 간결, 자동 로딩 | loader 실패/지연 시 영향 범위를 설계해야 함 |
+| `AsyncLoadingCache<K, V>` | 로딩 지연이 크고 비동기 처리가 필요할 때 | 스레드 점유 감소, 병렬 처리 유리 | Future 체인/타임아웃/예외 처리 설계 필요 |
+
+### 1-5. Spring 래핑 사용 예시
+
+```kotlin
+@Bean
+fun cacheManager(): CacheManager {
+    val manager = CaffeineCacheManager("products")
+    manager.setCaffeine(
+        Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(Duration.ofSeconds(10))
+    )
+    return manager
+}
+
+@Cacheable(cacheNames = ["products"], key = "#id")
+fun findProduct(id: String): Product {
+    return productRepository.findById(id)
+        ?: error("not found")
+}
+```
 
 출처:
 - Caffeine Wiki: https://github.com/ben-manes/caffeine/wiki
+- Spring Caffeine 설정: https://docs.spring.io/spring-framework/reference/integration/cache/store-configuration.html#cache-store-configuration-caffeine
 
 ---
 
 ## 2) 동작방식
 
-### 2-1. 축출(Eviction) 정책
-Caffeine은 정책을 조합해 동작한다.
-- Size: `maximumSize`, `maximumWeight + weigher`
-- Time: `expireAfterAccess`, `expireAfterWrite`, `expireAfter(Expiry)`
-- Reference: `weakKeys`, `weakValues`, `softValues`
+### 2-1. Eviction 정책 3축 (표)
+
+| 축 | 주요 옵션 | 언제 유용한가 | 실무 포인트 |
+| --- | --- | --- | --- |
+| Size | `maximumSize`, `maximumWeight` + `weigher` | 메모리 사용량 상한이 중요할 때 | `maximumWeight`는 객체 "개수"가 아니라 "가중치 합" 제어 |
+| Time | `expireAfterWrite`, `expireAfterAccess`, `expireAfter(Expiry)` | 데이터 신선도 제어가 중요할 때 | write 기준/접근 기준의 의미를 API 계약에 명시 |
+| Reference | `weakKeys`, `weakValues`, `softValues` | GC 기반 해제 전략이 필요할 때 | 동등성/GC 영향이 커서 기본값(strong)부터 시작 권장 |
+
+### 2-2. Size 기반 상세
+- `maximumSize`: 엔트리 수 기반 상한
+- `maximumWeight + weigher`: 엔트리별 비용을 정의해 가중치 합으로 제어
+- Caffeine은 admission/eviction 정책을 통해 hit ratio를 최대화하려고 시도한다(W-TinyLFU 계열)
+
+### 2-3. Time 기반 상세
+- `expireAfterWrite`: 마지막 쓰기 시점 기준 만료
+- `expireAfterAccess`: 마지막 접근 시점 기준 만료
+- `expireAfter(Expiry)`: 엔트리별 커스텀 만료 정책
+
+### 2-4. Reference 기반 상세
+- `weakKeys`: key를 약한 참조로 관리
+- `weakValues`, `softValues`: value를 GC 정책과 연계
+- 참조 기반 정책은 성능보다 메모리 압력 대응 목적일 때 선택하는 편이 안전하다.
 
 출처:
 - Eviction: https://github.com/ben-manes/caffeine/wiki/Eviction
-
-### 2-2. 내부 설계 핵심
-Caffeine은 동시성 환경에서 락 경합을 줄이고 처리량을 올리기 위해 버퍼/큐 기반 구조를 사용한다.
-그리고 적중률 관점에서는 W-TinyLFU 계열 정책으로 알려져 있다.
-
-출처:
 - Design: https://github.com/ben-manes/caffeine/wiki/Design
 
-### 2-3. expire vs refresh
-- `expireAfterWrite`: 만료되면 해당 시점 이후 새 로딩 전까지 값이 비어있을 수 있음
-- `refreshAfterWrite`: 조회가 들어올 때 refresh가 트리거되며, refresh 중에는 기존 값이 반환될 수 있음
+---
+
+## 3) expire vs refresh (표 + 예시)
+
+### 3-1. 개념 비교
+
+| 항목 | `expireAfterWrite` | `refreshAfterWrite` |
+| --- | --- | --- |
+| 트리거 | 만료 시점 도달 | 읽기 시점에 refresh 대상 확인 |
+| 사용자 체감 | 만료 후 재로딩 전 값 부재 가능 | refresh 중 기존 값 반환 가능 |
+| 목적 | 엄격한 유효기간 | 부드러운 갱신(백그라운드 성격) |
+
+### 3-2. 코드 예시
+
+```kotlin
+// expire: ttl 이후에는 로딩이 완료되기 전까지 miss가 발생할 수 있음
+val expireCache = Caffeine.newBuilder()
+    .expireAfterWrite(Duration.ofSeconds(10))
+    .build<String, Product> { key -> loadFromStore(key) }
+
+// refresh: 조회 시 refresh가 트리거되고, refresh 중 기존값을 반환할 수 있음
+val refreshCache = Caffeine.newBuilder()
+    .refreshAfterWrite(Duration.ofSeconds(10))
+    .build<String, Product> { key -> loadFromStore(key) }
+```
 
 출처:
 - Refresh: https://github.com/ben-manes/caffeine/wiki/Refresh
 
 ---
 
-## 3) Spring 래핑 vs Native Caffeine: 왜 직접 제어를 선택했나
+## 4) Spring 래핑 vs Native Caffeine 직접제어
 
-여기서 핵심은 "Spring이 Caffeine을 지원하느냐"가 아니다. 지원한다.
-문제는 **요구사항을 어디서 표현할지**다.
+### 4-1. 비교 표
 
-### 3-1. Spring 방식이 잘 맞는 경우
-- 선언형 캐싱(`@Cacheable`, `@CacheEvict`)으로 충분할 때
-- 캐시 키/조건/무효화를 메서드 단위로 단순하게 다룰 때
-- 캐시 내부 메타데이터(TTL source 구분 등)를 응답에 노출할 필요가 없을 때
+| 관점 | Spring 래핑 (`@Cacheable`, `CaffeineCacheManager`) | Native Caffeine + 수동 cache-aside |
+| --- | --- | --- |
+| 생산성 | 높음 (선언형) | 중간 (직접 구현) |
+| 로직 가시성 | 메서드 단위로 분산될 수 있음 | 서비스 플로우에 집중되어 명확 |
+| source/TTL 응답 노출 | 기본 추상화 범위 밖 | 직접 구현 가능 |
+| L1(Local) + L2(Redis) 세밀 제어 | 추가 설계 필요 | 자연스럽게 구현 가능 |
+| 학습 목적 적합성 | 개념 입문에 유리 | 내부 흐름 학습에 유리 |
 
-Spring 공식 문서와 Javadoc을 보면 Caffeine 연동 옵션이 풍부하다.
-- `CaffeineCacheManager` 기본 연동
-- `setCaffeine`, `setCaffeineSpec`, `setCacheSpecification`
-- `registerCustomCache`로 cache별 개별 설정
-- 6.1+에서 async cache mode 지원
+### 4-2. 왜 이 study는 Native를 선택했는가
+현재 study 요구사항은 아래였다.
+- 조회 source(`LOCAL/REDIS/MISS`)를 응답으로 내려야 함
+- `ttlRemainingSeconds`를 source 기준으로 내려야 함
+- `seed` 재적재 시 local invalidate 정책 제어 필요
+- local clear API 같은 운영/학습 훅 필요
+
+이 요구사항은 "캐시 적용"보다 "캐시 흐름 자체"가 핵심이라, 수동 cache-aside가 더 직접적이다.
+
+### 4-3. Spring 래핑이 부족하다는 뜻인가?
+아니다. Spring 래핑은 메서드 결과 캐싱에는 매우 효율적이다.
+다만 이번 주제는 "결과 캐싱"이 아니라 "계층 캐시 오케스트레이션"이 중심이라 선택이 달라진 케이스다.
 
 출처:
 - Spring cache store config: https://docs.spring.io/spring-framework/reference/integration/cache/store-configuration.html#cache-store-configuration-caffeine
-- CaffeineCacheManager Javadoc: https://docs.enterprise.spring.io/spring-framework/docs/6.1.22/javadoc-api/org/springframework/cache/caffeine/CaffeineCacheManager.html
-
-### 3-2. Native 방식을 택한 이유 (이 프로젝트 기준)
-이 저장소의 학습 요구사항은 아래였다.
-- L1(Local) -> L2(Redis mock) 순서 제어
-- `source`(LOCAL/REDIS/MISS)를 응답으로 노출
-- 조회 시점의 `ttlRemainingSeconds`를 source 기준으로 내려주기
-- 재seed 시 local invalidate 같은 세밀한 제어
-- 수동 local clear API 제공
-
-이런 요구는 선언형 캐시만으로 표현하면 로직이 흩어지거나, 응답 의미를 맞추기 어렵다.
-그래서 서비스 레이어에서 cache-aside를 수동 구현해 흐름을 명확히 보이게 했다.
-
-정리:
-- Spring 래핑이 "부족해서"가 아니라,
-- 이번 요구사항이 "흐름/메타데이터를 직접 통제"하는 쪽에 가까워 native가 더 적합했다.
+- Spring `CaffeineCacheManager` Javadoc: https://docs.enterprise.spring.io/spring-framework/docs/6.1.22/javadoc-api/org/springframework/cache/caffeine/CaffeineCacheManager.html
 
 ---
 
-## 4) 응용방식
+## 5) 응용방식
 
-### 4-1. L1(Local) + L2(Redis) 패턴
-전형적인 읽기 흐름:
-1. Local 조회
-2. miss면 Redis 조회
-3. Redis hit면 Local 재적재
+### 5-1. 패턴별 적용 가이드 (표)
 
-이 구조는 지연시간과 백엔드 부하를 동시에 줄이는 데 유리하다.
+| 패턴 | 적합한 상황 | 핵심 구현 포인트 |
+| --- | --- | --- |
+| Cache-aside | 가장 일반적인 읽기 최적화 | miss 시 하위 저장소 조회 + 상위 캐시 적재 |
+| Read-through (LoadingCache) | 로딩 규칙이 일관적일 때 | loader 예외/타임아웃 설계 |
+| Write-through/Write-behind | 쓰기 일관성과 처리량 균형 | 실패 재시도/순서 보장 정책 필요 |
+| L1 + L2 계층 캐시 | 저지연 + 인스턴스 간 데이터 공유 | TTL 관계, 무효화 전파 전략 설계 |
 
-### 4-2. 운영 확장 포인트
-- `recordStats()` + 메트릭 연동(Micrometer)
-- `removalListener`로 축출 원인 관찰
-- 캐시별 정책 분리(핫키 vs 콜드키)
-- stampede 완화: loading/async loading, jitter TTL, 단건 락
-
-### 4-3. API 설계 팁
-2계층 캐시라면 `source`를 응답에 포함하는 것을 권장한다.
-- TTL 필드가 하나여도 source와 함께 보면 의미가 분명해진다.
+### 5-2. 운영 관측성 추천
+- `recordStats()`로 hit/miss/eviction 지표 수집
+- removal listener로 eviction cause 추적
+- 지표 예시: hit ratio, load latency, eviction count, stale read 비율
 
 ---
 
-## 5) 유의사항 (사이드 이펙트)
+## 6) 유의사항 (사이드 이펙트)
 
-### 5-1. TTL 오해
-L1/L2의 TTL은 독립적일 수 있다.
-- 증상: "Redis TTL 30인데 응답은 10/60으로 보임"
-- 원인: 응답 TTL이 Local 기준으로 계산됨
-- 완화: `source` + TTL 의미를 API 문서로 고정
+### 6-1. 사이드 이펙트 요약표
 
-### 5-2. refreshAfterWrite 오해
-- 증상: refresh를 설정했는데 즉시 최신값이 안 보임
-- 원인: refresh는 조회 트리거 + 기존값 반환 가능
-- 완화: 강한 일관성이 필요하면 expire/수동 갱신과 함께 설계
+| 이슈 | 증상 | 원인 | 완화 전략 |
+| --- | --- | --- | --- |
+| TTL 의미 혼동 | Redis TTL과 응답 TTL이 다르게 보임 | L1/L2 TTL 기준이 다름 | `source`와 TTL 의미를 API 계약으로 고정 |
+| stale 데이터 노출 | 최신 쓰기 직후 이전 값 응답 | refresh/비동기 갱신 특성 | 쓰기 시 invalidate, 중요 경로는 expire 기반 설계 |
+| stampede | miss 폭주 시 DB/Redis 부하 급증 | 동시 miss 요청 집중 | loading/async, jitter TTL, key 단위 lock |
+| reference 정책 부작용 | 예측 어려운 eviction | GC 영향 + 참조 전략 | strong 기본, 메모리 압력 구간에 한정 적용 |
+| 테스트 불안정 | 간헐적 실패 | sleep 의존 시간 레이스 | `Ticker` 기반 테스트 고려 |
 
-### 5-3. weak/soft reference 부작용
-- 증상: 예상과 다른 hit/miss 또는 비교 동작
-- 원인: reference 기반 정책의 동등성/GC 영향
-- 완화: 기본 strong reference부터 시작, 필요 시 제한적으로 도입
-
-### 5-4. weight 정책 착시
-- 증상: 객체 크기 변화가 축출에 반영되지 않음
-- 원인: weight는 생성/업데이트 시점 계산 후 고정
-- 완화: 값 구조 변경 시 갱신 정책/재적재 전략 설계
-
-### 5-5. 시간 의존 테스트의 불안정성
-- 증상: 간헐적 실패
-- 원인: `Thread.sleep` 기반 타이밍 레이스
-- 완화: 가능하면 `Ticker` 기반 테스트로 전환
+### 6-2. 체크리스트
+- 캐시 목적(성능/일관성/비용절감)을 명시했는가?
+- TTL, invalidation, fallback 정책을 문서화했는가?
+- 관측 지표 없이 감으로 조정하고 있지 않은가?
 
 ---
 
-## 6) 실전 체크리스트
-- 이 캐시는 성능 최적화용인가, 일관성 보장용인가?
-- TTL은 비즈니스 신선도 요구와 맞는가?
-- source/TTL 의미가 API 계약으로 고정돼 있는가?
-- invalidate 전략(쓰기/이벤트/수동)이 정의돼 있는가?
-- hit/miss/eviction 지표를 관찰하고 있는가?
+## 7) 더 깊은 내부 구조 보기
+
+아래 심화 문서에서 Caffeine의 내부 자료구조/버퍼/maintenance 흐름을 더 상세히 다룬다.
+- `study/2026-03-22_caffeine-local-cache-internals-deep-dive.md`
 
 ---
 
