@@ -2,6 +2,7 @@ package com.vibewithcodex.study.cachetier.api
 
 import com.vibewithcodex.study.cachetier.application.StudyCacheTierService
 import com.vibewithcodex.study.cachetier.domain.CacheLookupResponse
+import com.vibewithcodex.study.cachetier.domain.CacheStatsResponse
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Positive
 import org.springframework.web.bind.annotation.GetMapping
@@ -50,6 +51,14 @@ class StudyCacheTierController(
     @GetMapping("/data/{key}")
     fun getData(@PathVariable key: String): CacheLookupResponse {
         return studyCacheTierService.getData(key)
+    }
+
+    /**
+     * Local Cache 통계를 조회한다.
+     */
+    @GetMapping("/stats")
+    fun getStats(): CacheStatsResponse {
+        return studyCacheTierService.getLocalCacheStats()
     }
 
     /**

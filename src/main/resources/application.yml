@@ -1,3 +1,9 @@
 spring:
   application:
     name: vibe-with-codex
+
+study:
+  cachetier:
+    local-ttl-seconds: 10
+    redis-default-ttl-seconds: 60
+    local-maximum-size: 10000

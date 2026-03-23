@@ -6,6 +6,10 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 
@@ -116,6 +120,50 @@ class StudyCacheTierServiceTest : FunSpec() {
             val afterClear = studyCacheTierService.getData("product:5")
             afterClear.source shouldBe CacheSource.REDIS
             afterClear.value shouldBe "orange"
+        }
+
+        test("concurrent same-key lookup keeps redis access minimal with single-flight") {
+            studyCacheTierService.seedRedis(key = "product:concurrent", value = "kiwi", ttlSeconds = 5)
+
+            val pool = Executors.newFixedThreadPool(8)
+            val startLatch = CountDownLatch(1)
+            val doneLatch = CountDownLatch(8)
+            val sources = Collections.synchronizedList(mutableListOf<CacheSource>())
+
+            repeat(8) {
+                pool.submit {
+                    try {
+                        startLatch.await()
+                        val result = studyCacheTierService.getData("product:concurrent")
+                        sources.add(result.source)
+                    } finally {
+                        doneLatch.countDown()
+                    }
+                }
+            }
+
+            startLatch.countDown()
+            doneLatch.await()
+            pool.shutdown()
+
+            sources.size shouldBe 8
+            sources.count { it == CacheSource.REDIS } shouldBe 1
+            sources.count { it == CacheSource.MISS } shouldBe 0
+        }
+
+        test("local cache stats are exposed for operational checks") {
+            studyCacheTierService.seedRedis(key = "product:stats", value = "melon", ttlSeconds = 5)
+            studyCacheTierService.getData("product:stats")
+            studyCacheTierService.getData("product:stats")
+
+            val stats = studyCacheTierService.getLocalCacheStats()
+
+            stats.requestCount shouldNotBe null
+            stats.hitCount shouldNotBe null
+            stats.missCount shouldNotBe null
+            stats.hitRate shouldNotBe null
+            (stats.requestCount >= 2) shouldBe true
+            (stats.hitCount >= 1) shouldBe true
         }
     }
 }
