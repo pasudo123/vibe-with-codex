@@ -1,0 +1,14 @@
+### 현재 학습 상태 확인
+GET http://localhost:8080/study/graceful-shutdown/state
+
+### 정상 baseline (READY)
+POST http://localhost:8080/study/graceful-shutdown/scenarios/READY_BASELINE/run?timeoutMs=300&retries=0
+
+### warmup 미완료 상태에서 timeout 재현
+POST http://localhost:8080/study/graceful-shutdown/scenarios/WARMUP_MISS/run?timeoutMs=100&retries=0
+
+### draining pod hit 상태에서 timeout 재현
+POST http://localhost:8080/study/graceful-shutdown/scenarios/DRAINING_POD_HIT/run?timeoutMs=100&retries=0
+
+### 첫 시도 timeout 후 retry 복구
+POST http://localhost:8080/study/graceful-shutdown/scenarios/RETRY_RECOVERS/run?timeoutMs=120&retries=1
