@@ -1,9 +1,21 @@
 spring:
   application:
     name: vibe-with-codex
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  shutdown: graceful
 
 study:
   cachetier:
     local-ttl-seconds: 10
     redis-default-ttl-seconds: 60
     local-maximum-size: 10000
+  graceful-shutdown:
+    default-timeout-ms: 250
+    default-retries: 1
+    warmup-delay-ms: 1200
+    draining-delay-ms: 900
+    ready-delay-ms: 30
+    retry-backoff-ms: 50
