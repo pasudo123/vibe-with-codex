@@ -18,9 +18,9 @@ class StudyRequestContextConfig {
     fun studyRequestContextExecutor(): Executor {
         val executor = ThreadPoolTaskExecutor()
         executor.setThreadNamePrefix("study-request-context-")
-        executor.setCorePoolSize(2)
-        executor.setMaxPoolSize(2)
-        executor.setQueueCapacity(50)
+        executor.corePoolSize = 2
+        executor.maxPoolSize = 2
+        executor.queueCapacity = 50
         executor.initialize()
         return executor
     }
