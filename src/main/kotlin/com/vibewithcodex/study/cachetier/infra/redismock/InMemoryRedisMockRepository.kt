@@ -22,14 +22,13 @@ class InMemoryRedisMockRepository : RedisMockRepository {
 
         // 조회 시 만료 여부를 판단하는 lazy expiration 방식.
         if (entry.expiresAtMillis <= now) {
-            store.remove(key)
+            // 값이 갱신된 경우를 고려해 (key, entry) 일치 시에만 제거한다.
+            store.remove(key, entry)
             return null
         }
-        val ttlRemainingMillis = entry.expiresAtMillis - now
-        val ttlRemainingSeconds = (ttlRemainingMillis + 999) / 1000
         return RedisLookupResult(
             value = entry.value,
-            ttlRemainingSeconds = ttlRemainingSeconds,
+            ttlRemainingSeconds = calculateTtlRemainingSeconds(entry.expiresAtMillis, now),
         )
     }
 
@@ -41,6 +40,11 @@ class InMemoryRedisMockRepository : RedisMockRepository {
 
     override fun clear() {
         store.clear()
+    }
+
+    private fun calculateTtlRemainingSeconds(expiresAtMillis: Long, nowMillis: Long): Long {
+        val ttlRemainingMillis = expiresAtMillis - nowMillis
+        return if (ttlRemainingMillis <= 0) 0 else (ttlRemainingMillis + 999) / 1000
     }
 }
 

@@ -4,8 +4,8 @@ import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import com.vibewithcodex.study.cachetier.application.LocalCacheValue
 import java.time.Duration
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.annotation.EnableCaching
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
@@ -17,15 +17,20 @@ import org.springframework.context.annotation.Configuration
  */
 @Configuration
 @EnableCaching
+@EnableConfigurationProperties(StudyCacheTierProperties::class)
 class StudyCacheTierConfig {
 
     @Bean(name = [LOCAL_CACHE_BEAN_NAME])
     fun studyLocalCache(
-        @Value("\${study.cachetier.local-ttl-seconds:10}") localTtlSeconds: Long,
+        properties: StudyCacheTierProperties,
     ): Cache<String, LocalCacheValue> {
         // expireAfterWrite: 최초 저장 시점부터 TTL 카운트다운.
         return Caffeine.newBuilder()
-            .expireAfterWrite(Duration.ofSeconds(localTtlSeconds))
+            .expireAfterWrite(Duration.ofSeconds(properties.localTtlSeconds))
+            // 무제한 성장을 방지하기 위해 캐시 엔트리 상한을 둔다.
+            .maximumSize(properties.localMaximumSize)
+            // 운영 지표(hit/miss/eviction) 수집을 활성화한다.
+            .recordStats()
             .build()
     }
 
