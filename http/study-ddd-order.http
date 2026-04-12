@@ -1,0 +1,73 @@
+@host = http://localhost:8080
+@contentType = application/json
+@orderId = order-20260412-001
+
+### 1) 주문 생성
+POST {{host}}/study/ddd/order/orders
+Content-Type: {{contentType}}
+
+{
+  "orderId": "{{orderId}}",
+  "orderer": {
+    "memberId": "member-100",
+    "name": "홍길동"
+  },
+  "shippingInfo": {
+    "receiver": {
+      "name": "홍길동",
+      "phoneNumber": "010-1111-2222"
+    },
+    "address": {
+      "zipCode": "06236",
+      "address1": "서울시 강남구 테헤란로 123",
+      "address2": "10층"
+    },
+    "message": "문 앞에 놓아주세요."
+  },
+  "orderLines": [
+    {
+      "productId": "product-1",
+      "unitPrice": 15000,
+      "quantity": 2
+    },
+    {
+      "productId": "product-2",
+      "unitPrice": 3000,
+      "quantity": 1
+    }
+  ]
+}
+
+### 2) 배송 정보 변경
+PUT {{host}}/study/ddd/order/orders/{{orderId}}/shipping-info
+Content-Type: {{contentType}}
+
+{
+  "receiver": {
+    "name": "김영희",
+    "phoneNumber": "010-3333-4444"
+  },
+  "address": {
+    "zipCode": "04524",
+    "address1": "서울시 중구 세종대로 110",
+    "address2": "5층"
+  },
+  "message": "경비실에 맡겨주세요."
+}
+
+### 3) 존재하지 않는 주문의 배송 정보 변경 (실패 케이스 확인)
+PUT {{host}}/study/ddd/order/orders/not-found-order/shipping-info
+Content-Type: {{contentType}}
+
+{
+  "receiver": {
+    "name": "테스트",
+    "phoneNumber": "010-0000-0000"
+  },
+  "address": {
+    "zipCode": "00000",
+    "address1": "없는 주소",
+    "address2": ""
+  },
+  "message": ""
+}
