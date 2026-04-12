@@ -194,6 +194,21 @@ flowchart LR
   - 배송 컨텍스트의 상품: 배송 대상 품목
   - 정산 컨텍스트의 상품: 정산 기준 항목
 
+### 9) Kotlin `@JvmInline value class`를 DDD에 쓰는 이유와 방법
+
+- 왜 쓰는가
+  - 식별자/점수 같은 도메인 값을 원시 타입(`String`, `Int`) 대신 의미 있는 타입으로 표현해 타입 안정성을 높인다.
+  - `OrderId`, `MemberId`, `ProductId`를 서로 잘못 전달하는 실수를 컴파일 단계에서 줄인다.
+  - 생성 팩토리(`of`)에서 검증을 강제해 "유효한 상태로 생성" 원칙을 지키기 쉽다.
+- 어떻게 쓰는가
+  - 단일 값 래퍼를 `@JvmInline value class`로 선언한다.
+  - 주 생성자는 `private`으로 숨기고 `companion object`의 `of(...)`로만 생성하게 한다.
+  - 예시: `OrderId`, `MemberId`, `ProductId`, `CategoryId`, `ReviewId`, `ReviewScore`.
+- 유의사항
+  - 제네릭/널 처리/인터페이스 업캐스팅 같은 상황에서는 boxing이 발생할 수 있다.
+  - JPA 엔티티 필드에 바로 매핑할 때는 `AttributeConverter` 같은 매핑 전략을 함께 설계한다.
+  - 남용보다는 "도메인 의미가 분명한 값"에 우선 적용한다.
+
 ## 응용
 
 - 인메모리 저장소 대신 JPA 기반 `OrderRepository` 구현체를 추가해도 응용/도메인 코드는 유지할 수 있다.
