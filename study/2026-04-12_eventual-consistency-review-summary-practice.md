@@ -19,7 +19,7 @@ eventual consistency를 적용하는 방법을 다룬다.
 
 핵심 테스트:
 
-- `src/test/kotlin/com/vibewithcodex/study/ddd/order/EventualConsistencyReviewSummaryTest.kt`
+- `src/test/kotlin/com/vibewithcodex/study/ddd/review/EventualConsistencyReviewSummaryTest.kt`
 
 ## 동작 방식
 
