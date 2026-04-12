@@ -23,6 +23,15 @@
 - [2026-04-12_ddd-layered-architecture-dip-order-practice.md](study/2026-04-12_ddd-layered-architecture-dip-order-practice.md)
 - [2026-04-12_eventual-consistency-review-summary-practice.md](study/2026-04-12_eventual-consistency-review-summary-practice.md)
 
+DDD 패키지 구조(바운디드 컨텍스트 기준):
+
+- `src/main/kotlin/com/vibewithcodex/study/ddd/ordering`
+- `src/main/kotlin/com/vibewithcodex/study/ddd/catalog`
+- `src/main/kotlin/com/vibewithcodex/study/ddd/review`
+- `src/main/kotlin/com/vibewithcodex/study/ddd/member`
+- `src/main/kotlin/com/vibewithcodex/study/ddd/shipping`
+- `src/main/kotlin/com/vibewithcodex/study/ddd/shared`
+
 ### Cache
 
 - [2026-03-22_caffeine-local-cache-deep-dive.md](study/2026-03-22_caffeine-local-cache-deep-dive.md)

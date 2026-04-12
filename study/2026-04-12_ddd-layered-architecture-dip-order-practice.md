@@ -174,19 +174,48 @@ flowchart LR
 
 - 바운디드 컨텍스트는 도메인 모델만의 경계가 아니다.
 - 주문 컨텍스트는 API, 응용 서비스, 도메인 모델, 인프라 구현, 저장 구조를 함께 포함하는 실행 단위다.
-- 이 프로젝트의 `study/ddd/order` 패키지는 주문 유비쿼터스 언어가 일관되게 유지되는 하나의 경계로 본다.
+- 학습 난이도와 결합도를 낮추기 위해 주문 예제를 컨텍스트별 패키지로 분리했다.
+  - `ordering`: 주문 생성/배송지 변경
+  - `catalog`: 카테고리/상품
+  - `review`: 리뷰/리뷰 요약 리드모델
+  - `member`: 회원/등급
+  - `shipping`: 배송 추적
+  - `shared`: 컨텍스트 간 공유 식별자/공통 예외
 
 ```mermaid
 flowchart LR
-  subgraph OrderBC["Order Bounded Context"]
-    API["API: study/ddd/order/api"]
-    APP["Application: UseCase/Service"]
-    DOMAIN["Domain: Aggregate/Value"]
-    INFRA["Infrastructure: Repository 구현"]
-    DB["Storage: Order 관련 스키마/테이블"]
+  subgraph OrderingBC["Ordering BC"]
+    API["API: study/ddd/ordering/api"]
+    APP["Application: study/ddd/ordering/application"]
+    DOMAIN["Domain: study/ddd/ordering/domain"]
+    INFRA["Infra: study/ddd/ordering/infra"]
     API --> APP --> DOMAIN
-    APP --> INFRA --> DB
+    APP --> INFRA
   end
+
+  subgraph CatalogBC["Catalog BC"]
+    CAPP["Application: study/ddd/catalog/application"]
+    CDOMAIN["Domain: study/ddd/catalog/domain"]
+    CINFRA["Infra: study/ddd/catalog/infra"]
+    CAPP --> CDOMAIN
+    CAPP --> CINFRA
+  end
+
+  subgraph ReviewBC["Review BC"]
+    RAPP["Application: study/ddd/review/application"]
+    RDOMAIN["Domain: study/ddd/review/domain"]
+    RINFRA["Infra: study/ddd/review/infra"]
+    RAPP --> RDOMAIN
+    RAPP --> RINFRA
+  end
+
+  subgraph SharedKernel["Shared"]
+    SHARED["study/ddd/shared"]
+  end
+
+  DOMAIN -. 식별자 참조 .-> SHARED
+  CDOMAIN -. 식별자 참조 .-> SHARED
+  RDOMAIN -. 식별자 참조 .-> SHARED
 ```
 
 - 같은 용어라도 컨텍스트가 다르면 의미가 달라질 수 있다.
