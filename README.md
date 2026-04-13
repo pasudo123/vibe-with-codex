@@ -13,7 +13,7 @@
 ## 학습 영역
 
 - RequestContext 전파/누락 동작 확인
-- 실무형 Cache tier(Local + Redis Mock + DB Mock) 패턴 실습
+- Caffeine Local Cache 활용 패턴 실습
 - DDD(애그리거트, 계층 책임, 트랜잭션 경계, 최종 일관성) 모델링 실습
 
 ## 학습 문서 인덱스
@@ -34,7 +34,7 @@ DDD 패키지 구조(바운디드 컨텍스트 기준):
 
 ### Cache
 
-- [2026-04-13_cache-layer-practical-patterns.md](study/2026-04-13_cache-layer-practical-patterns.md)
+- [2026-04-13_caffeine-local-cache-patterns.md](study/2026-04-13_caffeine-local-cache-patterns.md)
 - [2026-03-22_caffeine-local-cache-deep-dive.md](study/2026-03-22_caffeine-local-cache-deep-dive.md)
 - [2026-03-22_caffeine-local-cache-internals-deep-dive.md](study/2026-03-22_caffeine-local-cache-internals-deep-dive.md)
 - [2026-03-24_k8s-local-cache-patterns.md](study/2026-03-24_k8s-local-cache-patterns.md)

@@ -1,14 +1,11 @@
 package com.vibewithcodex.study.cachetier.api
 
-import com.vibewithcodex.study.cachetier.application.CacheInvalidationResponse
-import com.vibewithcodex.study.cachetier.application.CacheMutationResponse
 import com.vibewithcodex.study.cachetier.application.StudyCacheTierService
 import com.vibewithcodex.study.cachetier.domain.CacheLookupResponse
-import com.vibewithcodex.study.cachetier.domain.CacheScenario
+import com.vibewithcodex.study.cachetier.domain.CacheMutationResponse
 import com.vibewithcodex.study.cachetier.domain.CacheStatsResponse
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Positive
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -17,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * 실무형 cache layer 학습 API.
+ * Caffeine 활용 패턴 실습 API.
  */
 @RestController
 @RequestMapping("/study/cachetier")
@@ -25,64 +22,54 @@ class StudyCacheTierController(
     private val studyCacheTierService: StudyCacheTierService,
 ) {
 
-    @PostMapping("/db/{key}")
-    fun upsertDb(
+    @PostMapping("/data/{key}")
+    fun putData(
         @PathVariable key: String,
-        @Valid @RequestBody request: UpsertDbRequest,
+        @Valid @RequestBody request: PutDataRequest,
     ): CacheMutationResponse {
-        return studyCacheTierService.upsertDb(
+        return studyCacheTierService.putData(
             key = key,
             value = request.value,
-            publishInvalidation = request.publishInvalidation,
+            invalidateCaches = request.invalidateCaches,
         )
     }
 
-    @PostMapping("/redis/{key}")
-    fun seedRedis(
+    @GetMapping("/cache-aside/{key}")
+    fun getWithCacheAside(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithCacheAside(key)
+    }
+
+    @GetMapping("/loading/{key}")
+    fun getWithLoadingCache(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithLoadingCache(key)
+    }
+
+    @GetMapping("/refresh/{key}")
+    fun getWithRefreshAfterWrite(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithRefreshAfterWrite(key)
+    }
+
+    @PostMapping("/refresh/{key}")
+    fun refreshNow(@PathVariable key: String): CacheMutationResponse {
+        return studyCacheTierService.refreshNow(key)
+    }
+
+    @PostMapping("/{cacheName}/{key}/invalidate")
+    fun invalidate(
+        @PathVariable cacheName: String,
         @PathVariable key: String,
-        @Valid @RequestBody request: SeedRedisRequest,
     ): CacheMutationResponse {
-        return studyCacheTierService.seedRedis(
-            key = key,
-            value = request.value,
-            ttlSeconds = request.ttlSeconds,
-        )
+        return studyCacheTierService.invalidate(cacheName, key)
     }
 
-    @GetMapping("/{scenario}/pods/{podId}/data/{key}")
-    fun getData(
-        @PathVariable scenario: CacheScenario,
-        @PathVariable podId: String,
-        @PathVariable key: String,
-    ): CacheLookupResponse {
-        return studyCacheTierService.getData(scenario, podId, key)
-    }
-
-    @PostMapping("/invalidate/{key}")
-    fun invalidateAllLocal(@PathVariable key: String): CacheInvalidationResponse {
-        return studyCacheTierService.invalidateAllLocal(key)
-    }
-
-    @PostMapping("/pods/{podId}/local/clear")
-    fun clearPodLocalCache(@PathVariable podId: String): CacheInvalidationResponse {
-        return studyCacheTierService.clearPodLocalCache(podId)
-    }
-
-    @GetMapping("/pods/{podId}/stats")
-    fun getPodStats(@PathVariable podId: String): CacheStatsResponse {
-        return studyCacheTierService.getLocalCacheStats(podId)
+    @GetMapping("/{cacheName}/stats")
+    fun getStats(@PathVariable cacheName: String): CacheStatsResponse {
+        return studyCacheTierService.getStats(cacheName)
     }
 }
 
-data class UpsertDbRequest(
+data class PutDataRequest(
     @field:NotBlank
     val value: String,
-    val publishInvalidation: Boolean = true,
-)
-
-data class SeedRedisRequest(
-    @field:NotBlank
-    val value: String,
-    @field:Positive
-    val ttlSeconds: Long? = null,
+    val invalidateCaches: Boolean = true,
 )

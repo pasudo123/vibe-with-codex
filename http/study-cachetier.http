@@ -1,65 +1,48 @@
 @host = http://localhost:8080
 @contentType = application/json
 
-### 1) DB 원천 데이터 저장 + Redis refresh + 모든 pod local invalidate
-POST {{host}}/study/cachetier/db/product:100
+### 1) 원천 데이터 저장
+POST {{host}}/study/cachetier/data/product:100
 Content-Type: {{contentType}}
 
 {
   "value": "apple",
-  "publishInvalidation": true
+  "invalidateCaches": true
 }
 
-### 2) LOCAL_REDIS_DB: pod-1 첫 조회는 Local miss -> Redis hit
-GET {{host}}/study/cachetier/LOCAL_REDIS_DB/pods/pod-1/data/product:100
+### 2) Cache-aside: 첫 조회는 loader, 다음 조회는 local cache
+GET {{host}}/study/cachetier/cache-aside/product:100
 Accept: {{contentType}}
 
-### 3) LOCAL_REDIS_DB: pod-1 재조회는 Local hit
-GET {{host}}/study/cachetier/LOCAL_REDIS_DB/pods/pod-1/data/product:100
+### 3) Cache-aside: local cache hit
+GET {{host}}/study/cachetier/cache-aside/product:100
 Accept: {{contentType}}
 
-### 4) pod-2는 별도 Local Cache라 첫 조회는 Local miss -> Redis hit
-GET {{host}}/study/cachetier/LOCAL_REDIS_DB/pods/pod-2/data/product:100
+### 4) LoadingCache: miss 시 Caffeine loader 자동 호출
+GET {{host}}/study/cachetier/loading/product:100
 Accept: {{contentType}}
 
-### 5) LOCAL_DB: Redis를 skip하고 DB fallback만 사용
-GET {{host}}/study/cachetier/LOCAL_DB/pods/pod-3/data/product:100
+### 5) refreshAfterWrite: refresh 대상 cache 조회
+GET {{host}}/study/cachetier/refresh/product:100
 Accept: {{contentType}}
 
-### 6) Redis-only seed
-POST {{host}}/study/cachetier/redis/banner:home
-Content-Type: {{contentType}}
-
-{
-  "value": "spring-sale",
-  "ttlSeconds": 30
-}
-
-### 7) LOCAL_REDIS: Redis hit 후 Local warm-up
-GET {{host}}/study/cachetier/LOCAL_REDIS/pods/pod-1/data/banner:home
-Accept: {{contentType}}
-
-### 8) LOCAL_REDIS: DB에 있어도 Redis에 없으면 MISS
-GET {{host}}/study/cachetier/LOCAL_REDIS/pods/pod-1/data/product:not-in-redis
-Accept: {{contentType}}
-
-### 9) 정합성 실험: invalidation 없이 DB 업데이트하면 warmed pod가 stale local을 볼 수 있음
-POST {{host}}/study/cachetier/db/product:100
+### 6) 원천 데이터만 변경하고 cache는 유지
+POST {{host}}/study/cachetier/data/product:100
 Content-Type: {{contentType}}
 
 {
   "value": "apple-v2",
-  "publishInvalidation": false
+  "invalidateCaches": false
 }
 
-### 10) 수동 invalidation 전파
-POST {{host}}/study/cachetier/invalidate/product:100
+### 7) refreshAfterWrite cache 수동 refresh
+POST {{host}}/study/cachetier/refresh/product:100
 Accept: {{contentType}}
 
-### 11) pod별 local cache 통계
-GET {{host}}/study/cachetier/pods/pod-1/stats
+### 8) cache-aside entry invalidate
+POST {{host}}/study/cachetier/cache-aside/product:100/invalidate
 Accept: {{contentType}}
 
-### 12) 특정 pod local cache 초기화
-POST {{host}}/study/cachetier/pods/pod-1/local/clear
+### 9) cache stats
+GET {{host}}/study/cachetier/cache-aside/stats
 Accept: {{contentType}}
