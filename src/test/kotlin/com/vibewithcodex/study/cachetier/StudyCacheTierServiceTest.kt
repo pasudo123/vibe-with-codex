@@ -1,28 +1,27 @@
 package com.vibewithcodex.study.cachetier
 
 import com.vibewithcodex.study.cachetier.application.StudyCacheTierService
-import com.vibewithcodex.study.cachetier.domain.CacheSource
+import com.vibewithcodex.study.cachetier.domain.CacheLayer
+import com.vibewithcodex.study.cachetier.domain.CacheScenario
+import com.vibewithcodex.study.cachetier.domain.CacheTraceResult
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.extensions.spring.SpringExtension
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 
-/**
- * StudyCacheTierService의 cache-aside 동작 검증 테스트.
- *
- * 테스트에서는 TTL 만료 시나리오를 빠르게 확인하기 위해
- * Local/Redis 기본 TTL을 1초로 낮춰 실행한다.
- */
 @SpringBootTest(
     properties = [
         "study.cachetier.local-ttl-seconds=1",
         "study.cachetier.redis-default-ttl-seconds=1",
+        "study.cachetier.local-maximum-size=100",
+        "study.cachetier.ttl-jitter-seconds=0",
+        "study.cachetier.pod-count=3",
     ],
 )
 class StudyCacheTierServiceTest : FunSpec() {
@@ -34,107 +33,114 @@ class StudyCacheTierServiceTest : FunSpec() {
         extensions(SpringExtension)
 
         beforeTest {
-            // 테스트 간 캐시 상태 공유를 방지한다.
             studyCacheTierService.clearForTest()
         }
 
-        test("local miss, redis hit, then local hit") {
-            // 1) Redis Mock에 데이터 주입
-            studyCacheTierService.seedRedis(key = "product:1", value = "apple", ttlSeconds = 5)
+        test("LOCAL_REDIS_DB falls back to DB, then warms Redis and Local") {
+            studyCacheTierService.upsertDb(key = "product:1", value = "apple")
+            Thread.sleep(1200)
 
-            // 2) 첫 조회는 Local miss -> Redis hit
-            val first = studyCacheTierService.getData("product:1")
-            first.source shouldBe CacheSource.REDIS
+            val first = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:1")
+            first.source shouldBe CacheLayer.DB
             first.value shouldBe "apple"
-            (first.ttlRemainingSeconds != null && first.ttlRemainingSeconds in 1L..5L) shouldBe true
+            first.version shouldBe 1
+            first.trace.map { it.layer } shouldContain CacheLayer.DB
 
-            // 3) 같은 키 재조회는 Local hit
-            val second = studyCacheTierService.getData("product:1")
-            second.source shouldBe CacheSource.LOCAL
+            val second = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:1")
+            second.source shouldBe CacheLayer.LOCAL
             second.value shouldBe "apple"
-            (second.ttlRemainingSeconds != null && second.ttlRemainingSeconds in 0L..1L) shouldBe true
+
+            studyCacheTierService.clearPodLocalCache("pod-1")
+
+            val third = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:1")
+            third.source shouldBe CacheLayer.REDIS
+            third.value shouldBe "apple"
         }
 
-        test("both local and redis miss") {
-            // 어떤 계층에도 데이터가 없으면 MISS를 반환해야 한다.
-            val response = studyCacheTierService.getData("product:missing")
+        test("LOCAL_REDIS does not use DB fallback when Redis misses") {
+            studyCacheTierService.upsertDb(key = "product:2", value = "banana")
+            Thread.sleep(1200)
 
-            response.source shouldBe CacheSource.MISS
+            val response = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS, "pod-1", "product:2")
+
+            response.source shouldBe CacheLayer.MISS
             response.value.shouldBeNull()
-            response.ttlRemainingSeconds.shouldBeNull()
+            response.version.shouldBeNull()
+            response.trace.any { it.layer == CacheLayer.DB && it.result == CacheTraceResult.SKIP } shouldBe true
         }
 
-        test("local ttl expiration forces redis lookup again") {
-            // Redis TTL은 충분히 길게 주고, Local TTL만 먼저 만료시키는 시나리오.
-            studyCacheTierService.seedRedis(key = "product:2", value = "banana", ttlSeconds = 5)
+        test("LOCAL_DB skips Redis and reads only DB after Local miss") {
+            studyCacheTierService.seedRedis(key = "product:3", value = "redis-only", ttlSeconds = 5)
 
-            studyCacheTierService.getData("product:2").source shouldBe CacheSource.REDIS
-            studyCacheTierService.getData("product:2").source shouldBe CacheSource.LOCAL
+            val redisOnly = studyCacheTierService.getData(CacheScenario.LOCAL_DB, "pod-1", "product:3")
+            redisOnly.source shouldBe CacheLayer.MISS
+            studyCacheTierService.getRedisAccessCount("product:3") shouldBe 0
 
-            // 테스트 프로퍼티(local TTL=1초) 기준으로 만료 유도.
-            Thread.sleep(1200)
+            studyCacheTierService.upsertDb(key = "product:3", value = "cherry")
 
-            // Local 만료 후에는 다시 Redis에서 읽어와야 한다.
-            studyCacheTierService.getData("product:2").source shouldBe CacheSource.REDIS
+            val dbBacked = studyCacheTierService.getData(CacheScenario.LOCAL_DB, "pod-1", "product:3")
+            dbBacked.source shouldBe CacheLayer.DB
+            dbBacked.value shouldBe "cherry"
+            studyCacheTierService.getRedisAccessCount("product:3") shouldBe 0
         }
 
-        test("redis mock ttl expiration returns miss") {
-            // Redis TTL도 짧게 설정해 저장소 자체 만료를 검증한다.
-            studyCacheTierService.seedRedis(key = "product:3", value = "cherry", ttlSeconds = 1)
+        test("each pod owns an independent Local Cache") {
+            studyCacheTierService.upsertDb(key = "product:4", value = "durian")
 
-            Thread.sleep(1200)
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:4").source shouldBe CacheLayer.REDIS
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:4").source shouldBe CacheLayer.LOCAL
 
-            // Redis 만료 이후에는 Local도 비어있으므로 MISS가 맞다.
-            val response = studyCacheTierService.getData("product:3")
-            response.source shouldBe CacheSource.MISS
-            response.value.shouldBeNull()
+            val pod2FirstRead = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-2", "product:4")
+
+            pod2FirstRead.source shouldBe CacheLayer.REDIS
+            pod2FirstRead.trace.first().result shouldBe CacheTraceResult.MISS
         }
 
-        test("same key reseed invalidates local and resets effective ttl flow") {
-            // 첫 seed 후 조회해 Local 캐시에 값이 올라간 상태를 만든다.
-            studyCacheTierService.seedRedis(key = "product:4", value = "old", ttlSeconds = 5)
-            studyCacheTierService.getData("product:4").source shouldBe CacheSource.REDIS
-            studyCacheTierService.getData("product:4").source shouldBe CacheSource.LOCAL
+        test("DB update with invalidation refreshes stale pod Local Cache") {
+            studyCacheTierService.upsertDb(key = "product:5", value = "old")
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:5").source shouldBe CacheLayer.REDIS
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:5").source shouldBe CacheLayer.LOCAL
 
-            // 동일 key를 다시 seed하면 Local 캐시가 무효화되어야 한다.
-            studyCacheTierService.seedRedis(key = "product:4", value = "new", ttlSeconds = 1)
+            studyCacheTierService.upsertDb(key = "product:5", value = "new", publishInvalidation = true)
 
-            // 무효화가 되었다면 첫 조회는 Redis를 타고 최신 값을 가져와야 한다.
-            val afterReseed = studyCacheTierService.getData("product:4")
-            afterReseed.source shouldBe CacheSource.REDIS
-            afterReseed.value shouldBe "new"
-
-            // 짧은 TTL 만료 후에는 MISS가 되어야 한다.
-            Thread.sleep(1200)
-            studyCacheTierService.getData("product:4").source shouldBe CacheSource.MISS
+            val afterInvalidation = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:5")
+            afterInvalidation.source shouldBe CacheLayer.REDIS
+            afterInvalidation.value shouldBe "new"
+            afterInvalidation.version shouldBe 2
         }
 
-        test("manual local clear forces next read to redis") {
-            studyCacheTierService.seedRedis(key = "product:5", value = "orange", ttlSeconds = 5)
-            studyCacheTierService.getData("product:5").source shouldBe CacheSource.REDIS
-            studyCacheTierService.getData("product:5").source shouldBe CacheSource.LOCAL
+        test("missing invalidation can leave a pod serving stale Local Cache") {
+            studyCacheTierService.upsertDb(key = "product:6", value = "old")
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:6").source shouldBe CacheLayer.REDIS
+            val localBeforeUpdate = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:6")
+            localBeforeUpdate.source shouldBe CacheLayer.LOCAL
+            localBeforeUpdate.value shouldBe "old"
 
-            studyCacheTierService.clearLocalCache()
+            studyCacheTierService.upsertDb(key = "product:6", value = "new", publishInvalidation = false)
 
-            // Local을 비운 직후에는 Redis 경로로 다시 조회되어야 한다.
-            val afterClear = studyCacheTierService.getData("product:5")
-            afterClear.source shouldBe CacheSource.REDIS
-            afterClear.value shouldBe "orange"
+            val stale = studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:6")
+            stale.source shouldBe CacheLayer.LOCAL
+            stale.value shouldBe "old"
+            stale.version shouldBe 1
         }
 
-        test("concurrent same-key lookup keeps redis access minimal with single-flight") {
+        test("same-key concurrent Local miss uses single-flight per pod") {
             studyCacheTierService.seedRedis(key = "product:concurrent", value = "kiwi", ttlSeconds = 5)
 
             val pool = Executors.newFixedThreadPool(8)
             val startLatch = CountDownLatch(1)
             val doneLatch = CountDownLatch(8)
-            val sources = Collections.synchronizedList(mutableListOf<CacheSource>())
+            val sources = Collections.synchronizedList(mutableListOf<CacheLayer>())
 
             repeat(8) {
                 pool.submit {
                     try {
                         startLatch.await()
-                        val result = studyCacheTierService.getData("product:concurrent")
+                        val result = studyCacheTierService.getData(
+                            CacheScenario.LOCAL_REDIS_DB,
+                            "pod-1",
+                            "product:concurrent",
+                        )
                         sources.add(result.source)
                     } finally {
                         doneLatch.countDown()
@@ -147,23 +153,22 @@ class StudyCacheTierServiceTest : FunSpec() {
             pool.shutdown()
 
             sources.size shouldBe 8
-            sources.count { it == CacheSource.REDIS } shouldBe 1
-            sources.count { it == CacheSource.MISS } shouldBe 0
+            sources.count { it == CacheLayer.REDIS } shouldBe 1
+            sources.count { it == CacheLayer.LOCAL } shouldBe 7
+            studyCacheTierService.getRedisAccessCount("product:concurrent") shouldBe 1
         }
 
-        test("local cache stats are exposed for operational checks") {
-            studyCacheTierService.seedRedis(key = "product:stats", value = "melon", ttlSeconds = 5)
-            studyCacheTierService.getData("product:stats")
-            studyCacheTierService.getData("product:stats")
+        test("pod Local Cache stats are exposed") {
+            studyCacheTierService.upsertDb(key = "product:stats", value = "melon")
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:stats")
+            studyCacheTierService.getData(CacheScenario.LOCAL_REDIS_DB, "pod-1", "product:stats")
 
-            val stats = studyCacheTierService.getLocalCacheStats()
+            val stats = studyCacheTierService.getLocalCacheStats("pod-1")
 
-            stats.requestCount shouldNotBe null
-            stats.hitCount shouldNotBe null
-            stats.missCount shouldNotBe null
-            stats.hitRate shouldNotBe null
+            stats.podId shouldBe "pod-1"
             (stats.requestCount >= 2) shouldBe true
             (stats.hitCount >= 1) shouldBe true
+            (stats.estimatedSize >= 1) shouldBe true
         }
     }
 }

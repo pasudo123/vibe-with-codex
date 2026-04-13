@@ -7,3 +7,5 @@ study:
     local-ttl-seconds: 10
     redis-default-ttl-seconds: 60
     local-maximum-size: 10000
+    ttl-jitter-seconds: 0
+    pod-count: 3

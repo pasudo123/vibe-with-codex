@@ -6,24 +6,25 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import jakarta.validation.Validation
 
-/**
- * 캐시 설정값 검증 테스트.
- */
 class StudyCacheTierPropertiesValidationTest : FunSpec({
     val validator = Validation.buildDefaultValidatorFactory().validator
 
-    test("ttl/maximum size are required to be positive") {
+    test("ttl, maximum size, and pod count must be valid") {
         val properties = StudyCacheTierProperties(
             localTtlSeconds = 0,
             redisDefaultTtlSeconds = -1,
             localMaximumSize = 0,
+            ttlJitterSeconds = -1,
+            podCount = 0,
         )
 
         val violations = validator.validate(properties)
-        violations.size shouldBe 3
+        violations.size shouldBe 5
         val fields = violations.map { it.propertyPath.toString() }
         fields shouldContain "localTtlSeconds"
         fields shouldContain "redisDefaultTtlSeconds"
         fields shouldContain "localMaximumSize"
+        fields shouldContain "ttlJitterSeconds"
+        fields shouldContain "podCount"
     }
 })

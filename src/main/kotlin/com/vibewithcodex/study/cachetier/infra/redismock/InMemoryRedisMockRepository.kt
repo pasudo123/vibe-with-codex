@@ -1,58 +1,65 @@
 package com.vibewithcodex.study.cachetier.infra.redismock
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import org.springframework.stereotype.Repository
 
 /**
- * Redis Mock의 in-memory 구현체.
- *
- * 핵심 포인트:
- * - 저장 시 만료 시각(expiresAtMillis)을 함께 보관한다.
- * - 조회 시 만료 여부를 검사하고 만료면 즉시 제거한다.
- * - ConcurrentHashMap으로 간단한 동시성 접근을 처리한다.
+ * L2 Redis를 흉내 내는 shared in-memory repository.
  */
 @Repository
 class InMemoryRedisMockRepository : RedisMockRepository {
 
     private val store = ConcurrentHashMap<String, RedisMockEntry>()
+    private val accessCounts = ConcurrentHashMap<String, AtomicLong>()
 
     override fun get(key: String): RedisLookupResult? {
+        accessCounts.computeIfAbsent(key) { AtomicLong() }.incrementAndGet()
+
         val entry = store[key] ?: return null
         val now = System.currentTimeMillis()
-
-        // 조회 시 만료 여부를 판단하는 lazy expiration 방식.
         if (entry.expiresAtMillis <= now) {
-            // 값이 갱신된 경우를 고려해 (key, entry) 일치 시에만 제거한다.
             store.remove(key, entry)
             return null
         }
+
         return RedisLookupResult(
             value = entry.value,
-            ttlRemainingSeconds = calculateTtlRemainingSeconds(entry.expiresAtMillis, now),
+            version = entry.version,
+            ttlRemainingSeconds = ttlRemainingSeconds(entry.expiresAtMillis, now),
         )
     }
 
-    override fun put(key: String, value: String, ttlSeconds: Long) {
+    override fun put(key: String, value: String, version: Long, ttlSeconds: Long) {
         require(ttlSeconds > 0) { "ttlSeconds must be greater than 0" }
-        val expiresAtMillis = System.currentTimeMillis() + (ttlSeconds * 1000)
-        store[key] = RedisMockEntry(value, expiresAtMillis)
+        store[key] = RedisMockEntry(
+            value = value,
+            version = version,
+            expiresAtMillis = System.currentTimeMillis() + ttlSeconds * 1000,
+        )
+    }
+
+    override fun invalidate(key: String) {
+        store.remove(key)
     }
 
     override fun clear() {
         store.clear()
+        accessCounts.clear()
     }
 
-    private fun calculateTtlRemainingSeconds(expiresAtMillis: Long, nowMillis: Long): Long {
-        val ttlRemainingMillis = expiresAtMillis - nowMillis
-        return if (ttlRemainingMillis <= 0) 0 else (ttlRemainingMillis + 999) / 1000
+    override fun getAccessCount(key: String): Long {
+        return accessCounts[key]?.get() ?: 0
+    }
+
+    private fun ttlRemainingSeconds(expiresAtMillis: Long, nowMillis: Long): Long {
+        val remainingMillis = expiresAtMillis - nowMillis
+        return if (remainingMillis <= 0) 0 else (remainingMillis + 999) / 1000
     }
 }
 
-/**
- * Redis Mock 내부 저장 모델.
- * value와 절대 만료 시각을 함께 보관한다.
- */
 data class RedisMockEntry(
     val value: String,
+    val version: Long,
     val expiresAtMillis: Long,
 )
