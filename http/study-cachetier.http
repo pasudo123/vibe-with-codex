@@ -1,57 +1,48 @@
 @host = http://localhost:8080
 @contentType = application/json
 
-### 1) Redis Mock에 seed 데이터 저장
-POST {{host}}/study/cachetier/seed
+### 1) 원천 데이터 저장
+POST {{host}}/study/cachetier/data/product:100
 Content-Type: {{contentType}}
 
 {
-  "key": "product:100",
   "value": "apple",
-  "ttlSeconds": 30
+  "invalidateCaches": true
 }
 
-### 2) 첫 조회: Local miss -> Redis hit 기대 (source: REDIS)
-# 응답 필드 확인: ttlRemainingSeconds (source=REDIS 이므로 Redis TTL 기준)
-GET {{host}}/study/cachetier/data/product:100
+### 2) Cache-aside: 첫 조회는 loader, 다음 조회는 local cache
+GET {{host}}/study/cachetier/cache-aside/product:100
 Accept: {{contentType}}
 
-### 3) 즉시 재조회: Local hit 기대 (source: LOCAL)
-# 응답 필드 확인: ttlRemainingSeconds (source=LOCAL 이므로 Local TTL 기준)
-GET {{host}}/study/cachetier/data/product:100
+### 3) Cache-aside: local cache hit
+GET {{host}}/study/cachetier/cache-aside/product:100
 Accept: {{contentType}}
 
-### 4) 존재하지 않는 key 조회: MISS 기대 (source: MISS)
-GET {{host}}/study/cachetier/data/product:not-found
+### 4) LoadingCache: miss 시 Caffeine loader 자동 호출
+GET {{host}}/study/cachetier/loading/product:100
 Accept: {{contentType}}
 
-### 5) TTL 만료 테스트용 seed (2초)
-POST {{host}}/study/cachetier/seed
+### 5) refreshAfterWrite: refresh 대상 cache 조회
+GET {{host}}/study/cachetier/refresh/product:100
+Accept: {{contentType}}
+
+### 6) 원천 데이터만 변경하고 cache는 유지
+POST {{host}}/study/cachetier/data/product:100
 Content-Type: {{contentType}}
 
 {
-  "key": "product:ttl-short",
-  "value": "short-lived",
-  "ttlSeconds": 2
+  "value": "apple-v2",
+  "invalidateCaches": false
 }
 
-### 6) 즉시 조회: Redis hit 기대 (source: REDIS)
-GET {{host}}/study/cachetier/data/product:ttl-short
+### 7) refreshAfterWrite cache 수동 refresh
+POST {{host}}/study/cachetier/refresh/product:100
 Accept: {{contentType}}
 
-### 7) 즉시 재조회: Local hit 기대 (source: LOCAL)
-GET {{host}}/study/cachetier/data/product:ttl-short
+### 8) cache-aside entry invalidate
+POST {{host}}/study/cachetier/cache-aside/product:100/invalidate
 Accept: {{contentType}}
 
-### 8) Local Cache 수동 초기화 (Redis는 유지)
-POST {{host}}/study/cachetier/local/clear
-Accept: {{contentType}}
-
-### 9) Local clear 직후 조회: Redis hit 기대 (source: REDIS)
-GET {{host}}/study/cachetier/data/product:ttl-short
-Accept: {{contentType}}
-
-### 10) 3초 이상 대기 후 다시 조회: Redis TTL 만료로 MISS 기대 (source: MISS)
-# 수동 대기 가이드: 마지막 요청 실행 전에 최소 3초 기다린 뒤 실행
-GET {{host}}/study/cachetier/data/product:ttl-short
+### 9) cache stats
+GET {{host}}/study/cachetier/cache-aside/stats
 Accept: {{contentType}}

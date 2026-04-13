@@ -2,9 +2,10 @@ package com.vibewithcodex.study.cachetier.api
 
 import com.vibewithcodex.study.cachetier.application.StudyCacheTierService
 import com.vibewithcodex.study.cachetier.domain.CacheLookupResponse
+import com.vibewithcodex.study.cachetier.domain.CacheMutationResponse
 import com.vibewithcodex.study.cachetier.domain.CacheStatsResponse
+import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Positive
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -13,11 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * cache-tier 학습용 API.
- *
- * - seed: Redis Mock에 데이터 주입
- * - data: Local -> Redis 순서의 실제 조회 흐름 확인
- * - local/clear: Local Cache 수동 초기화
+ * Caffeine 활용 패턴 실습 API.
  */
 @RestController
 @RequestMapping("/study/cachetier")
@@ -25,82 +22,54 @@ class StudyCacheTierController(
     private val studyCacheTierService: StudyCacheTierService,
 ) {
 
-    /**
-     * Redis Mock에 seed 데이터를 저장한다.
-     * ttlSeconds를 생략하면 서비스 기본 TTL 정책을 사용한다.
-     */
-    @PostMapping("/seed")
-    fun seed(@RequestBody request: SeedCacheRequest): SeedCacheResponse {
-        studyCacheTierService.seedRedis(
-            key = request.key,
+    @PostMapping("/data/{key}")
+    fun putData(
+        @PathVariable key: String,
+        @Valid @RequestBody request: PutDataRequest,
+    ): CacheMutationResponse {
+        return studyCacheTierService.putData(
+            key = key,
             value = request.value,
-            ttlSeconds = request.ttlSeconds,
-        )
-
-        return SeedCacheResponse(
-            key = request.key,
-            value = request.value,
-            ttlSeconds = request.ttlSeconds,
-            message = "Seeded into Redis mock",
+            invalidateCaches = request.invalidateCaches,
         )
     }
 
-    /**
-     * 키를 조회하고 어떤 계층에서 hit 되었는지(source)를 함께 반환한다.
-     */
-    @GetMapping("/data/{key}")
-    fun getData(@PathVariable key: String): CacheLookupResponse {
-        return studyCacheTierService.getData(key)
+    @GetMapping("/cache-aside/{key}")
+    fun getWithCacheAside(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithCacheAside(key)
     }
 
-    /**
-     * Local Cache 통계를 조회한다.
-     */
-    @GetMapping("/stats")
-    fun getStats(): CacheStatsResponse {
-        return studyCacheTierService.getLocalCacheStats()
+    @GetMapping("/loading/{key}")
+    fun getWithLoadingCache(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithLoadingCache(key)
     }
 
-    /**
-     * Local Cache를 즉시 초기화한다.
-     * Redis Mock은 그대로 유지되므로 다음 조회 시 Redis 경로를 재확인할 수 있다.
-     */
-    @PostMapping("/local/clear")
-    fun clearLocalCache(): ClearLocalCacheResponse {
-        studyCacheTierService.clearLocalCache()
-        return ClearLocalCacheResponse(message = "Local cache cleared")
+    @GetMapping("/refresh/{key}")
+    fun getWithRefreshAfterWrite(@PathVariable key: String): CacheLookupResponse {
+        return studyCacheTierService.getWithRefreshAfterWrite(key)
+    }
+
+    @PostMapping("/refresh/{key}")
+    fun refreshNow(@PathVariable key: String): CacheMutationResponse {
+        return studyCacheTierService.refreshNow(key)
+    }
+
+    @PostMapping("/{cacheName}/{key}/invalidate")
+    fun invalidate(
+        @PathVariable cacheName: String,
+        @PathVariable key: String,
+    ): CacheMutationResponse {
+        return studyCacheTierService.invalidate(cacheName, key)
+    }
+
+    @GetMapping("/{cacheName}/stats")
+    fun getStats(@PathVariable cacheName: String): CacheStatsResponse {
+        return studyCacheTierService.getStats(cacheName)
     }
 }
 
-/**
- * seed 요청 모델.
- *
- * @property key 캐시 키
- * @property value 저장할 값
- * @property ttlSeconds Redis Mock TTL(초), null이면 서비스 기본값 사용
- */
-data class SeedCacheRequest(
-    @field:NotBlank
-    val key: String,
+data class PutDataRequest(
     @field:NotBlank
     val value: String,
-    @field:Positive
-    val ttlSeconds: Long? = null,
-)
-
-/**
- * seed 결과 응답 모델.
- */
-data class SeedCacheResponse(
-    val key: String,
-    val value: String,
-    val ttlSeconds: Long?,
-    val message: String,
-)
-
-/**
- * local cache clear 결과 응답 모델.
- */
-data class ClearLocalCacheResponse(
-    val message: String,
+    val invalidateCaches: Boolean = true,
 )
